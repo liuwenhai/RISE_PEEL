@@ -14,9 +14,10 @@ from easydict import EasyDict as edict
 from diffusers.optimization import get_cosine_schedule_with_warmup
 
 from policy import RISE
-from dataset.realworld import RealWorldDataset, collate_fn
+from dataset.realworld import RealWorldDataset, collate_fn, PeelingDatasetHDF5
 from utils.training import set_seed, plot_history, sync_loss
 
+from tensorboardX import SummaryWriter
 
 default_args = edict({
     "data_path": "data/collect_pens",
@@ -56,15 +57,20 @@ def train(args_override):
     LOCAL_RANK = int(os.environ['LOCAL_RANK'])
     os.environ['NCCL_P2P_DISABLE'] = '1'
     dist.init_process_group(backend = 'nccl', init_method = 'env://', world_size = WORLD_SIZE, rank = RANK)
-
+    
+    # ckpt path
+    if RANK == 0 and not os.path.exists(args.ckpt_dir):
+        os.makedirs(args.ckpt_dir)
+    # if RANK == 0:
+    #     tb_logger = SummaryWriter(os.path.join(args.ckpt_dir, 'tb'))
+    
     # set up device
     set_seed(args.seed)
     torch.cuda.set_device(LOCAL_RANK)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
     # dataset & dataloader
     if RANK == 0: print("Loading dataset ...")
-    dataset = RealWorldDataset(
+    dataset = PeelingDatasetHDF5(
         path = args.data_path,
         split = 'train',
         num_obs = 1,
@@ -94,7 +100,7 @@ def train(args_override):
         num_action = args.num_action,
         input_dim = 6,
         obs_feature_dim = args.obs_feature_dim,
-        action_dim = 10,
+        action_dim = dataset.action_dim,
         hidden_dim = args.hidden_dim,
         nheads = args.nheads,
         num_encoder_layers = args.num_encoder_layers,
@@ -117,9 +123,7 @@ def train(args_override):
         if RANK == 0:
             print("Checkpoint {} loaded.".format(args.resume_ckpt))
 
-    # ckpt path
-    if RANK == 0 and not os.path.exists(args.ckpt_dir):
-        os.makedirs(args.ckpt_dir)
+    
     
     # optimizer and lr scheduler
     if RANK == 0: print("Loading optimizer and scheduler ...")
@@ -166,6 +170,7 @@ def train(args_override):
 
         if RANK == 0:
             print("Train loss: {:.6f}".format(avg_loss))
+            # tb_logger.add_scalar("train/loss", avg_loss, epoch)
             if (epoch + 1) % args.save_epochs == 0:
                 torch.save(
                     policy.module.state_dict(),

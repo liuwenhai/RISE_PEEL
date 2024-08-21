@@ -7,6 +7,9 @@ IMG_STD = np.array([0.229, 0.224, 0.225])
 # tcp normalization and gripper width normalization
 TRANS_MIN, TRANS_MAX = np.array([-0.35, -0.35, 0]), np.array([0.35, 0.35, 0.7]) 
 MAX_GRIPPER_WIDTH = 0.11 # meter
+FORCE_MIN, FORCE_MAX = np.array([-5, -5, -15]), np.array([3, 15, 3])
+TORQUE_MIN, TORQUE_MAX = np.array([-2, -2, -2]), np.array([2, 2, 2])
+WRENCH_MIN, WRENCH_MAX = np.array([-5, -5, -15, -2, -2, -2]), np.array([3, 15, 3, 2, 2, 2])
 
 # workspace in camera coordinate
 WORKSPACE_MIN = np.array([-0.5, -0.5, 0])

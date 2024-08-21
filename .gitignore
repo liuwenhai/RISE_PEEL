@@ -5,7 +5,8 @@ data
 data/
 logs
 logs/
-
+.idea/
+dependencies/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
