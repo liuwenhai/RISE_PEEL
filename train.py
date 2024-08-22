@@ -78,7 +78,8 @@ def train(args_override):
         voxel_size = args.voxel_size,
         aug = args.aug,
         aug_jitter = args.aug_jitter, 
-        with_cloud = False
+        with_cloud = False,
+        use_action_wrench=args.use_action_wrench
     )
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, 
@@ -208,5 +209,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_epochs', action = 'store', type = int, help = 'saving epochs', required = False, default = 50)
     parser.add_argument('--num_workers', action = 'store', type = int, help = 'number of workers', required = False, default = 24)
     parser.add_argument('--seed', action = 'store', type = int, help = 'seed', required = False, default = 233)
+    parser.add_argument('--use_action_wrench', action = 'store_true', help = 'whether to predict action wrench')
+
 
     train(vars(parser.parse_args()))
