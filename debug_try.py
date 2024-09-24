@@ -1,7 +1,7 @@
 from dataset.realworld import RealWorldDataset, PeelingDataset, PeelingDatasetHDF5
 import torch
 from tqdm import tqdm
-from utils_temp import Agent
+from utils_temp import Agent, PeelDataRos
 path = 'data/collect_cups'
 # path = 'data/peel_data_1'
 path = 'data/peel_data_1'
@@ -27,7 +27,10 @@ dataloader = torch.utils.data.DataLoader(
         num_workers = 0,
     )
 dataloader = tqdm(dataset)
-agent = Agent()
+# vis dataset, not including robot
+agent_data = PeelDataRos()
+# vis robot
+# agent_robot = Agent()
 import time
 from utils.constants import *
 def unnormalize_action(action):
@@ -45,10 +48,22 @@ for data in dataloader:
     action = data['action'].numpy()[0]
     action_norm = data['action_normalized'].numpy()[0]
     cloud[:, 3:] = cloud[:, 3:] * IMG_STD + IMG_MEAN
+    cloud[:, 3:] *= 255
     action_norm_ = unnormalize_action(action_norm)
-    agent.update_robot_state(action, cloud)
+    # agent_robot.update_robot_state(action, cloud)
     # import pdb;pdb.set_trace()
-    # time.sleep(0.05)
+    if aug:
+        for act in data['action_normalized'].numpy():
+            act = unnormalize_action(act)
+            agent_data.update_all(act, cloud)
+            time.sleep(0.01)
+    else:
+        # for act in data['action_normalized'].numpy():
+        #     act = unnormalize_action(act)
+        #     agent_data.update_all(act, cloud)
+        #     time.sleep(0.1)
+        agent_data.update_all(action, cloud)
+        time.sleep(0.1)
     print('wrench: ', action[-6:])
     # data['action_normalized']
 

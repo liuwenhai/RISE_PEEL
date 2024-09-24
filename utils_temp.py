@@ -48,6 +48,139 @@ class RealData():
         return np.array([-1, 0, 0, 0, 1, 0])
 
 
+class PeelDataRos():
+    def __init__(self):
+        rospy.init_node('dataset_peeler')
+        self.joint_pub = rospy.Publisher('/joint_states', JointState, queue_size=10)
+        self.pc_pub = rospy.Publisher('/point_cloud', PointCloud2, queue_size=10)
+        self.wrench_pub = rospy.Publisher('/wrench', WrenchStamped, queue_size=10)
+        # pose_pub = rospy.Publisher('/gripper_cam_pose', PoseStamped, queue_size=10)
+
+        self.wrench_stamped_msg = WrenchStamped()
+        self.wrench_stamped_msg.header.frame_id = "ft_peeler"
+
+        joint_state = JointState()
+        joint_state.header = Header()
+        joint_state.name = ['finger_joint_left', 'finger_joint_right']
+        joint_state.velocity = []
+        joint_state.effort = []
+        self.joint_state = joint_state
+
+        self.br_world2ft = TransformBroadcaster()
+        ft_pose = TransformStamped()
+        ft_pose.header.frame_id = 'l515'
+        ft_pose.child_frame_id = 'ft_peeler'
+        self.ft_pose = ft_pose
+
+        self.br_world2gripper = TransformBroadcaster()
+        gripper_pose = TransformStamped()
+        gripper_pose.header.frame_id = 'l515'
+        gripper_pose.child_frame_id = 'gripper_base'
+        self.gripper_pose = gripper_pose
+
+        self.br_world2l515 = TransformBroadcaster()
+        l515_pose = TransformStamped()
+        l515_pose.header.frame_id = 'world'
+        l515_pose.child_frame_id = 'l515'
+        quat = Rot.from_matrix(L515_2_BASE[:3, :3]).as_quat()
+        l515_pose.transform.translation.x = L515_2_BASE[0, 3]
+        l515_pose.transform.translation.y = L515_2_BASE[1, 3]
+        l515_pose.transform.translation.z = L515_2_BASE[2, 3]
+        l515_pose.transform.rotation.x = quat[0]
+        l515_pose.transform.rotation.y = quat[1]
+        l515_pose.transform.rotation.z = quat[2]
+        l515_pose.transform.rotation.w = quat[3]
+        self.l515_pose = l515_pose
+
+    def update(self, clouds, gripper_width, gripper_xyz, gripper_quat, ft_xyz, ft_quat, wrench):
+        now = rospy.Time.now()
+        # static tf transform
+        self.l515_pose.header.stamp = now
+        self.br_world2l515.sendTransform(self.l515_pose)
+
+        # update
+
+        cloud_msg = create_point_cloud_msg(clouds, now)
+        self.pc_pub.publish(cloud_msg)
+
+        self.joint_state.position = [gripper_width / 2., gripper_width / 2.]
+        self.joint_state.header.stamp = now
+        self.joint_pub.publish(self.joint_state)
+
+        self.gripper_pose.transform.translation.x = gripper_xyz[0]
+        self.gripper_pose.transform.translation.y = gripper_xyz[1]
+        self.gripper_pose.transform.translation.z = gripper_xyz[2]
+        self.gripper_pose.transform.rotation.x = gripper_quat[0]
+        self.gripper_pose.transform.rotation.y = gripper_quat[1]
+        self.gripper_pose.transform.rotation.z = gripper_quat[2]
+        self.gripper_pose.transform.rotation.w = gripper_quat[3]
+        self.gripper_pose.header.stamp = now
+        self.br_world2gripper.sendTransform(self.gripper_pose)
+
+        self.ft_pose.transform.translation.x = ft_xyz[0]
+        self.ft_pose.transform.translation.y = ft_xyz[1]
+        self.ft_pose.transform.translation.z = ft_xyz[2]
+        self.ft_pose.transform.rotation.x = ft_quat[0]
+        self.ft_pose.transform.rotation.y = ft_quat[1]
+        self.ft_pose.transform.rotation.z = ft_quat[2]
+        self.ft_pose.transform.rotation.w = ft_quat[3]
+        self.ft_pose.header.stamp = now
+        self.br_world2ft.sendTransform(self.ft_pose)
+
+        self.wrench_stamped_msg.wrench.force = Vector3(wrench[0], wrench[1], wrench[2])
+        self.wrench_stamped_msg.wrench.torque = Vector3(wrench[3], wrench[4], wrench[5])
+        self.wrench_stamped_msg.header.stamp = now
+        self.wrench_pub.publish(self.wrench_stamped_msg)
+
+    def update_all(self, step_action, clouds):
+        gripper_width = step_action[18]
+        ft_pose = xyz_rot_transform(step_action[:9], from_rep="rotation_6d", to_rep="matrix")
+        gripper_pose = xyz_rot_transform(step_action[9:18], from_rep="rotation_6d", to_rep="matrix")
+        ft_xyz, ft_quat = ft_pose[:3,3], Rot.from_matrix(ft_pose[:3,:3]).as_quat()
+        gripper_xyz, gripper_quat = gripper_pose[:3,3], Rot.from_matrix(gripper_pose[:3,:3]).as_quat()
+        now = rospy.Time.now()
+        # static tf transform
+        self.l515_pose.header.stamp = now
+        self.br_world2l515.sendTransform(self.l515_pose)
+
+        # update
+
+        cloud_msg = create_point_cloud_msg(clouds, now)
+        self.pc_pub.publish(cloud_msg)
+
+        self.joint_state.position = [gripper_width / 2., gripper_width / 2.]
+        self.joint_state.header.stamp = now
+        self.joint_pub.publish(self.joint_state)
+
+        self.gripper_pose.transform.translation.x = gripper_xyz[0]
+        self.gripper_pose.transform.translation.y = gripper_xyz[1]
+        self.gripper_pose.transform.translation.z = gripper_xyz[2]
+        self.gripper_pose.transform.rotation.x = gripper_quat[0]
+        self.gripper_pose.transform.rotation.y = gripper_quat[1]
+        self.gripper_pose.transform.rotation.z = gripper_quat[2]
+        self.gripper_pose.transform.rotation.w = gripper_quat[3]
+        self.gripper_pose.header.stamp = now
+        self.br_world2gripper.sendTransform(self.gripper_pose)
+
+        self.ft_pose.transform.translation.x = ft_xyz[0]
+        self.ft_pose.transform.translation.y = ft_xyz[1]
+        self.ft_pose.transform.translation.z = ft_xyz[2]
+        self.ft_pose.transform.rotation.x = ft_quat[0]
+        self.ft_pose.transform.rotation.y = ft_quat[1]
+        self.ft_pose.transform.rotation.z = ft_quat[2]
+        self.ft_pose.transform.rotation.w = ft_quat[3]
+        self.ft_pose.header.stamp = now
+        self.br_world2ft.sendTransform(self.ft_pose)
+
+        if len(step_action)>19:
+            wrench = step_action[19:]
+            self.wrench_stamped_msg.wrench.force = Vector3(wrench[0], wrench[1], wrench[2])
+            self.wrench_stamped_msg.wrench.torque = Vector3(wrench[3], wrench[4], wrench[5])
+            self.wrench_stamped_msg.header.stamp = now
+            self.wrench_pub.publish(self.wrench_stamped_msg)
+
+
+
 class Agent():
     def __init__(self):
         rospy.init_node("agent")

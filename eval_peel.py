@@ -27,6 +27,8 @@ from utils.transformation import rotation_transform
 from utils_temp import RealData, Agent
 from pynput import keyboard
 
+from dataset.realworld import PeelingDatasetHDF5
+
 default_args = edict({
     "ckpt": None,
     "calib": "calib/",
@@ -97,7 +99,7 @@ def cvt_cloud_to_voxel(pc, voxel_size = 0.005):
     points = points[mask]
     colors = colors[mask]
     colors = (colors - IMG_MEAN) / IMG_STD
-    cloud = np.concatenate([points, colors], axis=-1)
+    cloud = np.concatenate([points, colors], axis=-1).astype(np.float32)
     return cloud
 def create_batch(coords, feats):
     """
@@ -179,16 +181,42 @@ def evaluate(args_override):
     set_seed(args.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    dataset = RealData("/mnt/data/data/peel_data/peel_data_1/data/000")
-    dataset_h5py = h5py.File('/home/wenhai/pub_repo/robotlearning/RISE/data/peel_data_1/cucumber_peel_0-11.hdf5', 'r')
-
+    dataset = RealData("/mnt/data/data/peel_data/peel_data_1/data/010")
+    # dataset_h5py = h5py.File('/home/wenhai/pub_repo/robotlearning/RISE/data/peel_data_1/cucumber_peel_0-11.hdf5', 'r')
+    dataset_h5py = h5py.File('/home/wenhai/pub_repo/robotlearning/RISE/data/peel_data_1/cucumber_peel_0-9_10000.hdf5', 'r')
+    # dataset_h5py = h5py.File('/home/wenhai/my_code/ft_collector/data/peel_data_1/cucumber_peel_10-11_test_10000.hdf5', 'r')
+    path = '/home/wenhai/pub_repo/robotlearning/RISE/data/peel_data_1'
+    num_action = 20
+    voxel_size = 0.005
+    aug = True
+    aug_jitter = False
+    # import pdb;pdb.set_trace()
+    dataset = PeelingDatasetHDF5(
+        path=path,
+        split='train',
+        num_obs=1,
+        num_action=num_action,
+        voxel_size=voxel_size,
+        aug=aug,
+        aug_jitter=aug_jitter,
+        with_cloud=False,
+        use_action_wrench=True
+    )
+    # dataloader = torch.utils.data.DataLoader(
+    #     dataset,
+    #     batch_size=1,
+    #     num_workers=0,
+    # )
     # policy
     print("Loading policy ...")
+    action_dim = 19
+    if args.use_action_wrench:
+        action_dim = 19+6
     policy = RISE(
         num_action = args.num_action,
         input_dim = 6,
         obs_feature_dim = args.obs_feature_dim,
-        action_dim = 19,
+        action_dim = action_dim,
         hidden_dim = args.hidden_dim,
         nheads = args.nheads,
         num_encoder_layers = args.num_encoder_layers,
@@ -206,9 +234,9 @@ def evaluate(args_override):
     agent = Agent()
     ensemble_buffer = EnsembleBuffer(mode = args.ensemble_mode)
     keyboard.Listener(on_press=_on_prese, on_release=_on_release).start()
-    if args.discretize_rotation:
-        # last_rot = np.array(agent.ready_rot_6d, dtype = np.float32)
-        last_rot = np.array(dataset.ready_rot_6d, dtype = np.float32)
+    # if args.discretize_rotation:
+    #     # last_rot = np.array(agent.ready_rot_6d, dtype = np.float32)
+    #     last_rot = np.array(dataset.ready_rot_6d, dtype = np.float32)
     with torch.inference_mode():
         policy.eval()
         prev_width = None
@@ -222,8 +250,8 @@ def evaluate(args_override):
         robot0_eef_wrench = obs['robot0_eef_wrench']
         robot0_eef_hand = obs['robot0_eef_hand']
         # max_steps = args.max_steps
-        pointclouds.max(dim = 0)
-        import pdb;pdb.set_trace()
+        # pointclouds.max(dim = 0)
+        # import pdb;pdb.set_trace()
         for t in range(max_steps):
             # colors, depths = dataset.get_item(t)
             # coords, feats, cloud = create_input(
@@ -232,7 +260,10 @@ def evaluate(args_override):
             #     cam_intrinsics = dataset.k,
             #     voxel_size = args.voxel_size
             # )
-            pc = pointclouds[t]
+            # import pdb;pdb.set_trace()
+            data = dataset[t]
+            # import pdb;pdb.set_trace()
+            pc = pointclouds[t].astype(np.float32)
             coords, feats, cloud = create_input_h5py(pc, args.voxel_size)
             cloud[:, 3:] = cloud[:, 3:] * IMG_STD + IMG_MEAN
             if t % args.num_action == 0:
@@ -274,34 +305,35 @@ def evaluate(args_override):
             if step_action is None:   # no action in the buffer => no movement.
                 continue
             agent.update_robot_state(step_action, cloud)
+            time.sleep(0.03)
             if finish:
                 break
             step_tcp = step_action[:-1]
             step_width = step_action[-1]
 
             # send tcp pose to robot
-            if args.discretize_rotation:
-                rot_steps = discretize_rotation(last_rot, step_tcp[3:9], np.pi / 16)
-                last_rot = step_tcp[3:9]
-                for rot in rot_steps:
-                    step_tcp[3:9] = rot
-                    # agent.set_tcp_pose(
-                    #     step_tcp, 
-                    #     rotation_rep = "rotation_6d",
-                    #     blocking = True
-                    # )
-            else:
-                # agent.set_tcp_pose(
-                #     step_tcp,
-                #     rotation_rep = "rotation_6d",
-                #     blocking = True
-                # )
-                pass
-            
-            # send gripper width to gripper (thresholding to avoid repeating sending signals to gripper)
-            if prev_width is None or abs(prev_width - step_width) > GRIPPER_THRESHOLD:
-                # agent.set_gripper_width(step_width, blocking = True)
-                prev_width = step_width
+            # if args.discretize_rotation:
+            #     rot_steps = discretize_rotation(last_rot, step_tcp[3:9], np.pi / 16)
+            #     last_rot = step_tcp[3:9]
+            #     for rot in rot_steps:
+            #         step_tcp[3:9] = rot
+            #         # agent.set_tcp_pose(
+            #         #     step_tcp,
+            #         #     rotation_rep = "rotation_6d",
+            #         #     blocking = True
+            #         # )
+            # else:
+            #     # agent.set_tcp_pose(
+            #     #     step_tcp,
+            #     #     rotation_rep = "rotation_6d",
+            #     #     blocking = True
+            #     # )
+            #     pass
+            #
+            # # send gripper width to gripper (thresholding to avoid repeating sending signals to gripper)
+            # if prev_width is None or abs(prev_width - step_width) > GRIPPER_THRESHOLD:
+            #     # agent.set_gripper_width(step_width, blocking = True)
+            #     prev_width = step_width
     
     # agent.stop()
 
@@ -326,5 +358,6 @@ if __name__ == '__main__':
     parser.add_argument('--vis', action = 'store_true', help = 'add visualization during evaluation')
     parser.add_argument('--discretize_rotation', action = 'store_true', help = 'whether to discretize rotation process.')
     parser.add_argument('--ensemble_mode', action = 'store', type = str, help = 'temporal ensemble mode', required = False, default = 'new')
+    parser.add_argument('--use_action_wrench', action='store_true', help='whether to predict action wrench')
 
     evaluate(vars(parser.parse_args()))

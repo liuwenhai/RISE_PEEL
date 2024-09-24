@@ -305,6 +305,7 @@ class PeelingDatasetHDF5(Dataset):
         
         self.hdf5_use_swmr = hdf5_use_swmr
         self.hdf5_path = os.path.join(self.path, 'cucumber_peel_0-9_10000.hdf5')
+        # self.hdf5_path = os.path.join(self.path, 'cucumber_peel_10-11_test_10000.hdf5')
         self._hdf5_file = None
         self.action_dim = 19
         self.use_action_wrench = use_action_wrench
@@ -361,7 +362,8 @@ class PeelingDatasetHDF5(Dataset):
         This property allows for a lazy hdf5 file open.
         """
         if self._hdf5_file is None:
-            self._hdf5_file = h5py.File(self.hdf5_path, 'r', swmr=self.hdf5_use_swmr, libver='latest')
+            # self._hdf5_file = h5py.File(self.hdf5_path, 'r', swmr=self.hdf5_use_swmr, libver='latest')
+            self._hdf5_file = h5py.File(self.hdf5_path, 'r')
         return self._hdf5_file
     
     def __len__(self):
@@ -388,6 +390,8 @@ class PeelingDatasetHDF5(Dataset):
             cloud.points = o3d.utility.Vector3dVector(pc[:,:3])
             cloud.colors = o3d.utility.Vector3dVector(pc[:,3:])
             cloud = cloud.voxel_down_sample(self.voxel_size)
+            # axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+            # o3d.visualization.draw_geometries([cloud, axis])
             points = np.array(cloud.points)
             colors = np.array(cloud.colors)
             x_mask = ((points[:, 0] >= WORKSPACE_MIN[0]) & (points[:, 0] <= WORKSPACE_MAX[0]))
@@ -407,11 +411,10 @@ class PeelingDatasetHDF5(Dataset):
         gripper_pose_action = np.concatenate([action_with_wrench[:, :3], action_with_wrench[:, 6:10]], axis=1)
         ft_pose_action = np.concatenate([action_with_wrench[:,3:6], action_with_wrench[:, 10:14]], axis=1)
         gripper_width_action = action_with_wrench[:,14:15]
+        ft_pose_action[:, [3, 4, 5, 6]] = ft_pose_action[:, [6, 3, 4, 5]]
+        gripper_pose_action[:, [3, 4, 5, 6]] = gripper_pose_action[:, [6, 3, 4, 5]]
         if self.split == 'train' and self.aug:
-            clouds, gripper_pose_action, ft_pose_action = self._augmentation(clouds, gripper_pose_action, ft_pose_action)
-
-        ft_pose_action[:,[3,4,5,6]] = ft_pose_action[:,[6,3,4,5]]
-        gripper_pose_action[:,[3,4,5,6]] = gripper_pose_action[:,[6,3,4,5]]
+            clouds, gripper_pose_action, ft_pose_action = self._augmentation_new(clouds, gripper_pose_action, ft_pose_action)
         ft_pose_action = xyz_rot_transform(ft_pose_action, from_rep = "quaternion", to_rep = "rotation_6d")
         gripper_pose_action = xyz_rot_transform(gripper_pose_action, from_rep = "quaternion", to_rep = "rotation_6d")
         gripper_width_action = gripper_width_action.reshape(-1, 1)
@@ -506,7 +509,37 @@ class PeelingDatasetHDF5(Dataset):
             cloud = apply_mat_to_pcd(cloud, aug_mat)
         tcps = apply_mat_to_pose(tcps, aug_mat, rotation_rep = "quaternion")
         tcps_1 = apply_mat_to_pose(tcps_1, aug_mat, rotation_rep = "quaternion")
-        return clouds, tcps, tcps_1  
+        return clouds, tcps, tcps_1
+
+    def _augmentation_new(self, clouds, tcps, tcps_1,x_min = -0.05, x_max = 0.05, y_min = -0.03, y_max = 0.03, z_min = -0.03, z_max = 0.05, z_theta_min = -np.pi / 4, z_theta_max = np.pi / 4):
+        # aug_trans_max = np.array([0.05,0.03,0.05])
+        # aug_trans_min = np.array([-0.05,-0.03,-0.03])
+        # translation_offsets = np.random.rand(3) * (aug_trans_max - aug_trans_min) + aug_trans_min
+        # rotation_angles = np.random.rand(3) * (self.aug_rot_max - self.aug_rot_min) + self.aug_rot_min
+        # rotation_angles = rotation_angles / 180 * np.pi  # tranform from degree to radius
+        x_trans = np.random.uniform(x_min, x_max)
+        y_trans = np.random.uniform(y_min, y_max)
+        z_trans = np.random.uniform(z_min, z_max)
+        z_theta = np.random.uniform(z_theta_min, z_theta_max)
+        rotation_angles = np.array([0, 0, z_theta])
+        translation_offsets = np.array([x_trans, y_trans, z_trans])
+        pose = rot_trans_mat(translation_offsets, rotation_angles)
+        # import pdb;pdb.set_trace()
+        L515_2_BASE = np.array([[1, 0, 0, 0],
+                                [0, -np.sin(70 / 180 * np.pi), np.cos(70 / 180 * np.pi), 0],
+                                [0, -np.cos(70 / 180 * np.pi), -np.sin(70 / 180 * np.pi), 0.59],
+                                [0, 0, 0, 1]])
+
+        l5152base = L515_2_BASE
+        l5152base[1, 3] = -0.25
+
+        transform_pose = np.linalg.inv(l5152base) @ pose @ l5152base
+        for cloud in clouds:
+            cloud = apply_mat_to_pcd(cloud, transform_pose)
+        tcps = apply_mat_to_pose(tcps, transform_pose, rotation_rep = "quaternion")
+        tcps_1 = apply_mat_to_pose(tcps_1, transform_pose, rotation_rep = "quaternion")
+
+        return clouds, tcps, tcps_1
         
     def load_point_cloud(self, colors, depths):
         h, w = depths.shape
